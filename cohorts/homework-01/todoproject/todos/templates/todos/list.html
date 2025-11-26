@@ -1,0 +1,37 @@
+{% extends 'todos/base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>My TODOs</h1>
+    <a href="{% url 'todos:create' %}" class="btn btn-primary">+ New TODO</a>
+</div>
+
+{% if todos %}
+    <div class="list-group">
+        {% for todo in todos %}
+            <div class="list-group-item {% if todo.resolved %}resolved{% endif %}">
+                <div class="d-flex w-100 justify-content-between">
+                    <h5 class="mb-1">{{ todo.title }}</h5>
+                    <div>
+                        <a href="{% url 'todos:toggle' todo.pk %}" class="btn btn-sm btn-outline-success">
+                            {% if todo.resolved %}Unresolve{% else %}Resolve{% endif %}
+                        </a>
+                        <a href="{% url 'todos:edit' todo.pk %}" class="btn btn-sm btn-outline-primary">Edit</a>
+                        <a href="{% url 'todos:delete' todo.pk %}" class="btn btn-sm btn-outline-danger">Delete</a>
+                    </div>
+                </div>
+                {% if todo.description %}
+                    <p class="mb-1">{{ todo.description }}</p>
+                {% endif %}
+                {% if todo.due_date %}
+                    <small class="{% if not todo.resolved and todo.due_date < today %}overdue{% endif %}">
+                        Due: {{ todo.due_date }}
+                    </small>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="alert alert-info">No TODOs yet. Create your first one!</div>
+{% endif %}
+{% endblock %}
