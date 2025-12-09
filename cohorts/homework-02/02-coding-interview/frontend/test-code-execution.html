@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browser Code Execution Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .column {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        h1, h2 {
+            color: #4CAF50;
+        }
+        textarea {
+            width: 100%;
+            min-height: 200px;
+            background-color: #252526;
+            color: #d4d4d4;
+            border: 1px solid #555;
+            border-radius: 5px;
+            padding: 10px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            resize: vertical;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:disabled {
+            background-color: #666;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        .output {
+            background-color: #252526;
+            padding: 15px;
+            border-radius: 5px;
+            min-height: 100px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border: 1px solid #555;
+        }
+        .error {
+            color: #f44336;
+        }
+        .loading {
+            color: #ff9800;
+        }
+        .info {
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #333;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Browser-Only Code Execution Test</h1>
+
+    <div class="info">
+        <strong>Instructions:</strong> Test JavaScript and Python code execution entirely in the browser.
+        <br>Python uses Pyodide (WebAssembly) and loads on first run.
+    </div>
+
+    <div class="container">
+        <!-- JavaScript Column -->
+        <div class="column">
+            <h2>JavaScript</h2>
+            <textarea id="jsCode" placeholder="// Enter JavaScript code here...">
+// Test with various JavaScript features
+console.log("Hello, World!");
+
+const numbers = [1, 2, 3, 4, 5];
+console.log("Array:", numbers);
+console.log("Sum:", numbers.reduce((a, b) => a + b, 0));
+
+// Test async function
+setTimeout(() => {
+    console.log("Async operation completed!");
+}, 100);
+
+// Return a value
+{
+    result: "JavaScript execution successful",
+    timestamp: new Date().toISOString()
+}</textarea>
+            <button id="jsRun">Run JavaScript</button>
+            <h3>Output:</h3>
+            <div id="jsOutput" class="output">Click "Run JavaScript" to execute</div>
+        </div>
+
+        <!-- Python Column -->
+        <div class="column">
+            <h2>Python (Pyodide)</h2>
+            <textarea id="pyCode" placeholder="# Enter Python code here...">
+// This is a JavaScript-style comment - will cause an error!
+print("This will fail with // comments")
+
+// Correct Python comment:
+# print("This would work with # comments")</textarea>
+            <button id="pyRun">Run Python</button>
+            <button id="convertComments" style="margin-left: 10px; background-color: #ff9800;">Convert JS Comments</button>
+            <h3>Output:</h3>
+            <div id="pyOutput" class="output">Click "Run Python" to execute (loads Pyodide on first run)</div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+    <script>
+        let pyodide = null;
+        let isPyodideLoading = false;
+
+        // JavaScript execution
+        document.getElementById('jsRun').addEventListener('click', () => {
+            const code = document.getElementById('jsCode').value;
+            const output = document.getElementById('jsOutput');
+            const button = document.getElementById('jsRun');
+
+            button.disabled = true;
+            output.textContent = 'Running...';
+            output.className = 'output loading';
+
+            setTimeout(() => {
+                try {
+                    const logs = [];
+                    const originalLog = console.log;
+                    const originalError = console.error;
+                    const originalWarn = console.warn;
+
+                    console.log = (...args) => {
+                        logs.push(`[log] ${args.map(arg =>
+                            typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+                        ).join(' ')}`);
+                    };
+
+                    console.error = (...args) => {
+                        logs.push(`[error] ${args.map(arg =>
+                            typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+                        ).join(' ')}`);
+                    };
+
+                    console.warn = (...args) => {
+                        logs.push(`[warn] ${args.map(arg =>
+                            typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+                        ).join(' ')}`);
+                    };
+
+                    let result;
+                    try {
+                        const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+                        const func = new AsyncFunction(`
+                            return (async () => {
+                                ${code}
+                            })()
+                        `);
+                        result = func();
+                    } catch (syncError) {
+                        const func = new Function(code);
+                        result = func();
+                    }
+
+                    setTimeout(() => {
+                        console.log = originalLog;
+                        console.error = originalError;
+                        console.warn = originalWarn;
+
+                        const consoleOutput = logs.join('\n');
+
+                        if (consoleOutput) {
+                            output.textContent = consoleOutput;
+                        } else if (result !== undefined && result !== null) {
+                            output.textContent = typeof result === 'object' ?
+                                JSON.stringify(result, null, 2) : String(result);
+                        } else {
+                            output.textContent = 'Code executed successfully (no output)';
+                        }
+                        output.className = 'output';
+                        button.disabled = false;
+                    }, 150);
+
+                } catch (error) {
+                    output.textContent = `Error: ${error.message}`;
+                    output.className = 'output error';
+                    button.disabled = false;
+                }
+            }, 10);
+        });
+
+        // Convert JavaScript comments to Python comments
+        document.getElementById('convertComments').addEventListener('click', () => {
+            const code = document.getElementById('pyCode').value;
+            const pythonCode = code.replace(/(https?:\/\/[^\s]+)|(\/\/.*)/g, (match, url, comment) => {
+                if (url) return url;
+                if (comment) return comment.replace('//', '#');
+                return match;
+            });
+            document.getElementById('pyCode').value = pythonCode;
+            document.getElementById('pyOutput').textContent = 'Comments converted! Click "Run Python" to execute.';
+            document.getElementById('pyOutput').className = 'output';
+        });
+
+        // Python execution with Pyodide
+        document.getElementById('pyRun').addEventListener('click', async () => {
+            const code = document.getElementById('pyCode').value;
+            const output = document.getElementById('pyOutput');
+            const button = document.getElementById('pyRun');
+
+            button.disabled = true;
+
+            // Load Pyodide if not already loaded
+            if (!pyodide && !isPyodideLoading) {
+                isPyodideLoading = true;
+                output.textContent = 'Loading Python environment (first time only)...';
+                output.className = 'output loading';
+
+                try {
+                    pyodide = await loadPyodide({
+                        indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/'
+                    });
+                    await pyodide.loadPackage(['micropip', 'numpy', 'pandas']);
+                    // Note: 'requests' is not available in Pyodide by default
+                    console.log('Pyodide loaded successfully');
+                } catch (error) {
+                    output.textContent = `Failed to load Python environment: ${error.message}`;
+                    output.className = 'output error';
+                    button.disabled = false;
+                    isPyodideLoading = false;
+                    return;
+                }
+                isPyodideLoading = false;
+            }
+
+            output.textContent = 'Running Python code...';
+            output.className = 'output loading';
+
+            try {
+                // Setup stdout capture
+                pyodide.runPython(`
+                    import sys
+                    from io import StringIO
+                    sys.stdout = StringIO()
+                `);
+
+                // Execute user code
+                let result = pyodide.runPython(code);
+
+                // Get captured output
+                const pyOutput = pyodide.runPython(`
+                    output = sys.stdout.getvalue()
+                    sys.stdout = sys.__stdout__
+                    output
+                `);
+
+                // Prepare final output
+                let finalOutput = pyOutput;
+
+                if (!pyOutput && result !== undefined && result !== null) {
+                    // Convert Pyodide proxy to JavaScript value
+                    result = result.toJs ? result.toJs() : result;
+                    if (typeof result === 'object' && result !== null) {
+                        finalOutput = JSON.stringify(result, null, 2);
+                    } else {
+                        finalOutput = String(result);
+                    }
+                }
+
+                output.textContent = finalOutput || 'Code executed successfully (no output)';
+                output.className = 'output';
+            } catch (error) {
+                output.textContent = `Error: ${error.message}`;
+                output.className = 'output error';
+            }
+
+            button.disabled = false;
+        });
+    </script>
+</body>
+</html>

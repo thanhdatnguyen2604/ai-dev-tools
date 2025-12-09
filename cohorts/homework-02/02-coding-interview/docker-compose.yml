@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+      - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
+    volumes:
+      - ./backend:/app/backend
+      - ./frontend/src:/app/frontend/src
+    command: python backend/manage.py runserver 0.0.0.0:8000

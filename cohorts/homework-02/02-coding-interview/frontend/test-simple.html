@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Code Execution Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        textarea {
+            width: 100%;
+            height: 200px;
+            background-color: #252526;
+            color: #d4d4d4;
+            border: 1px solid #555;
+            border-radius: 5px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 14px;
+            margin: 10px 0;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        .output {
+            background-color: #252526;
+            padding: 15px;
+            border-radius: 5px;
+            min-height: 100px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            border: 1px solid #555;
+            margin-top: 10px;
+        }
+        .error {
+            color: #f44336;
+        }
+        select {
+            padding: 8px;
+            background-color: #3c3c3c;
+            color: #d4d4d4;
+            border: 1px solid #555;
+            border-radius: 3px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Simple Browser Code Execution Test</h1>
+
+        <select id="language">
+            <option value="javascript">JavaScript</option>
+            <option value="python">Python</option>
+        </select>
+
+        <textarea id="code" placeholder="Enter code here..."></textarea>
+
+        <button onclick="runCode()">Run Code</button>
+        <button id="convertBtn" onclick="convertComments()" style="background-color: #ff9800; display: none;">Convert JS Comments</button>
+
+        <h3>Output:</h3>
+        <div id="output" class="output">Click "Run Code" to execute</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+    <script>
+        let pyodide = null;
+        let isLoadingPyodide = false;
+
+        const codeInput = document.getElementById('code');
+        const languageSelect = document.getElementById('language');
+        const output = document.getElementById('output');
+        const convertBtn = document.getElementById('convertBtn');
+
+        // Set default code based on language
+        function setDefaultCode() {
+            const lang = languageSelect.value;
+            if (lang === 'python') {
+                codeInput.value = '# Welcome to the coding interview!\n# Start coding here...\nprint("Hello from Python!")';
+            } else {
+                codeInput.value = '// Welcome to the coding interview!\n// Start coding here...\n';
+            }
+        }
+
+        // Initialize with JavaScript default
+        setDefaultCode();
+
+        // Update code when language changes
+        languageSelect.addEventListener('change', () => {
+            if (codeInput.value.includes('Welcome to the coding interview!')) {
+                setDefaultCode();
+            }
+        });
+
+        // Run code function
+        async function runCode() {
+            const code = codeInput.value;
+            const language = languageSelect.value;
+
+            output.textContent = 'Running...';
+            output.className = 'output';
+
+            if (language === 'javascript') {
+                runJavaScript(code);
+            } else if (language === 'python') {
+                await runPython(code);
+            }
+        }
+
+        // JavaScript execution
+        function runJavaScript(code) {
+            try {
+                const logs = [];
+                const originalLog = console.log;
+
+                console.log = (...args) => {
+                    logs.push(args.join(' '));
+                };
+
+                const result = eval(code);
+                console.log = originalLog;
+
+                output.textContent = logs.length > 0 ? logs.join('\n') :
+                                   result !== undefined ? String(result) :
+                                   'Code executed successfully (no output)';
+            } catch (error) {
+                output.textContent = `Error: ${error.message}`;
+                output.className = 'output error';
+            }
+        }
+
+        // Python execution
+        async function runPython(code) {
+            try {
+                // Load Pyodide if not already loaded
+                if (!pyodide && !isLoadingPyodide) {
+                    isLoadingPyodide = true;
+                    output.textContent = 'Loading Python environment (first time only)...';
+                    pyodide = await loadPyodide({
+                        indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/'
+                    });
+                    await pyodide.loadPackage(['micropip', 'numpy', 'pandas']);
+                    console.log('Pyodide loaded successfully');
+                }
+
+                // Check for JavaScript comments
+                if (code.includes('//')) {
+                    output.textContent = 'Syntax Error: Python uses # for comments, not //\n\n💡 Click "Convert JS Comments" to fix this automatically';
+                    output.className = 'output error';
+                    convertBtn.style.display = 'inline-block';
+                    return;
+                }
+
+                convertBtn.style.display = 'none';
+
+                // Capture stdout
+                pyodide.runPython(`
+                    import sys
+                    from io import StringIO
+                    sys.stdout = StringIO()
+                `);
+
+                // Run code
+                let result = pyodide.runPython(code);
+
+                // Get output
+                const pyOutput = pyodide.runPython(`
+                    output = sys.stdout.getvalue()
+                    sys.stdout = sys.__stdout__
+                    output
+                `);
+
+                output.textContent = pyOutput || 'Code executed successfully (no output)';
+                output.className = 'output';
+            } catch (error) {
+                output.textContent = `Error: ${error.message}`;
+                output.className = 'output error';
+            }
+        }
+
+        // Convert comments function
+        function convertComments() {
+            const code = codeInput.value;
+            const pythonCode = code.replace(/(https?:\/\/[^\s]+)|(\/\/.*)/g, (match, url, comment) => {
+                if (url) return url;
+                if (comment) return comment.replace('//', '#');
+                return match;
+            });
+            codeInput.value = pythonCode;
+            convertBtn.style.display = 'none';
+            output.textContent = 'Comments converted! Click "Run Code" to execute.';
+            output.className = 'output';
+        }
+    </script>
+</body>
+</html>

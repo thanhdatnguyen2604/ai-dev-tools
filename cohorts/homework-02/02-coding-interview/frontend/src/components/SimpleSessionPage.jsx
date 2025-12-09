@@ -1,15 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import Editor from '@monaco-editor/react'
+import { runPython, isPyodideLoaded } from '../utils/pyodideLoader'
 
 const SimpleSessionPage = () => {
   const { sessionId } = useParams()
   const wsRef = useRef(null)
   const [connected, setConnected] = useState(false)
-  const [code, setCode] = useState('// Welcome to the coding interview!\n// Start coding here...\n')
   const [language, setLanguage] = useState('javascript')
+  const [code, setCode] = useState(() =>
+    language === 'python'
+      ? '# Welcome to the coding interview!\n# Start coding here...\nprint("Hello from Python!")'
+      : '// Welcome to the coding interview!\n// Start coding here...\n'
+  )
   const [output, setOutput] = useState('')
   const [copySuccess, setCopySuccess] = useState(false)
+  const [isRunning, setIsRunning] = useState(false)
+  const [lastError, setLastError] = useState(null)
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -26,12 +33,23 @@ const SimpleSessionPage = () => {
 
       switch (data.type) {
         case 'init':
-          setCode(data.code || '// Welcome to the coding interview!')
-          setLanguage(data.language || 'javascript')
+          const initLang = data.language || 'javascript'
+          setLanguage(initLang)
+          if (data.code) {
+            setCode(data.code)
+          } else {
+            // Set default code based on language
+            setCode(initLang === 'python'
+              ? '# Welcome to the coding interview!\n# Start coding here...\nprint("Hello from Python!")'
+              : '// Welcome to the coding interview!\n// Start coding here...\n')
+          }
           break
         case 'update':
-          setCode(data.code || code)
-          setLanguage(data.language || language)
+          const updateLang = data.language || language
+          setLanguage(updateLang)
+          if (data.code) {
+            setCode(data.code)
+          }
           break
       }
     }
@@ -53,6 +71,16 @@ const SimpleSessionPage = () => {
     }
   }, [sessionId])
 
+  // Effect to update code when language changes (only for welcome message)
+  useEffect(() => {
+    if (code.includes('Welcome to the coding interview!')) {
+      const newCode = language === 'python'
+        ? '# Welcome to the coding interview!\n# Start coding here...\nprint("Hello from Python!")'
+        : '// Welcome to the coding interview!\n// Start coding here...\n'
+      setCode(newCode)
+    }
+  }, [language])
+
   // Handle code change
   const handleCodeChange = useCallback((newCode) => {
     setCode(newCode)
@@ -68,47 +96,167 @@ const SimpleSessionPage = () => {
   // Handle language change
   const handleLanguageChange = useCallback((newLanguage) => {
     setLanguage(newLanguage)
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'update',
-        code: code,
-        language: newLanguage
-      }))
+
+    // Change to appropriate default code if it's the welcome message
+    if (code.includes('Welcome to the coding interview!')) {
+      const newCode = newLanguage === 'python'
+        ? '# Welcome to the coding interview!\n# Start coding here...\nprint("Hello from Python!")'
+        : '// Welcome to the coding interview!\n// Start coding here...\n'
+      setCode(newCode)
+
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'update',
+          code: newCode,
+          language: newLanguage
+        }))
+      }
+    } else {
+      // Keep the existing code but send the language update
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'update',
+          code: code,
+          language: newLanguage
+        }))
+      }
     }
   }, [code])
 
   // Run code
-  const runCode = useCallback(() => {
+  const runCode = useCallback(async () => {
     if (!code) return
 
+    setIsRunning(true)
     setOutput('Running code...')
 
     if (language === 'javascript') {
       try {
+        // Create a safe execution context
         const logs = []
         const originalLog = console.log
+        const originalError = console.error
+        const originalWarn = console.warn
+
+        // Capture console outputs
         console.log = (...args) => {
-          logs.push(args.map(arg =>
-            typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-          ).join(' '))
+          logs.push(`[log] ${args.map(arg =>
+            typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+          ).join(' ')}`)
         }
 
-        const func = new Function(code)
-        const result = func()
+        console.error = (...args) => {
+          logs.push(`[error] ${args.map(arg =>
+            typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+          ).join(' ')}`)
+        }
 
+        console.warn = (...args) => {
+          logs.push(`[warn] ${args.map(arg =>
+            typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+          ).join(' ')}`)
+        }
+
+        // Execute the code in a try-catch block
+        let result
+        try {
+          // Use async function evaluation for better error handling
+          const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor
+          const func = new AsyncFunction(`
+            return (async () => {
+              ${code}
+            })()
+          `)
+          result = await func()
+        } catch (syncError) {
+          // Fallback to sync evaluation if async fails
+          const func = new Function(code)
+          result = func()
+        }
+
+        // Restore original console methods
         console.log = originalLog
+        console.error = originalError
+        console.warn = originalWarn
 
-        const output = logs.length > 0 ? logs.join('\n') :
-                      result !== undefined ? String(result) :
-                      'Code executed successfully (no output)'
-        setOutput(output)
+        // Prepare output
+        const consoleOutput = logs.join('\n')
+
+        if (consoleOutput) {
+          setOutput(consoleOutput)
+        } else if (result !== undefined && result !== null) {
+          // Handle different result types
+          if (typeof result === 'object') {
+            setOutput(JSON.stringify(result, null, 2))
+          } else {
+            setOutput(String(result))
+          }
+        } else {
+          setOutput('Code executed successfully (no output)')
+        }
       } catch (error) {
-        setOutput(`Error: ${error.message}`)
+        // Provide detailed error information
+        const errorInfo = {
+          name: error.name,
+          message: error.message,
+          stack: error.stack
+        }
+
+        // Try to extract the most relevant error line
+        const stackLines = error.stack ? error.stack.split('\n') : []
+        const relevantLine = stackLines.find(line =>
+          line.includes(':') && !line.includes('at Function') && !line.includes('at AsyncFunction')
+        )
+
+        setOutput(`Error: ${error.message}${relevantLine ? `\n${relevantLine.trim()}` : ''}`)
       }
     } else if (language === 'python') {
-      setOutput('Python execution would be loaded here...')
+      try {
+        if (!isPyodideLoaded()) {
+          setOutput('Loading Python environment (first time only)...')
+        }
+
+        const result = await runPython(code)
+
+        if (result.success) {
+          setOutput(result.output)
+          setLastError(null)
+        } else {
+          setOutput(result.error)
+          setLastError(result.suggestion)
+        }
+      } catch (error) {
+        setOutput(`Failed to execute Python code: ${error.message}`)
+      }
     }
+
+    setIsRunning(false)
   }, [code, language])
+
+  // Convert JavaScript comments to Python comments
+  const convertCommentsToPython = () => {
+    // Convert // comments to # comments
+    const pythonCode = code
+      // Replace // comments with # comments, but be careful with URLs
+      .replace(/(https?:\/\/[^\s]+)|(\/\/.*)/g, (match, url, comment) => {
+        if (url) return url; // Keep URLs as is
+        if (comment) return comment.replace('//', '#'); // Convert comment
+        return match;
+      });
+
+    setCode(pythonCode);
+    setLastError(null);
+    setOutput('Comments converted! Click "Run Code" to execute.');
+
+    // Send update via WebSocket
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'update',
+        code: pythonCode,
+        language: language
+      }));
+    }
+  };
 
   // Copy session link
   const copySessionLink = () => {
@@ -160,18 +308,36 @@ const SimpleSessionPage = () => {
         </select>
         <button
           onClick={runCode}
+          disabled={isRunning}
           style={{
             padding: '8px 16px',
-            backgroundColor: '#4CAF50',
+            backgroundColor: isRunning ? '#666' : '#4CAF50',
             color: 'white',
             border: 'none',
             borderRadius: '5px',
-            cursor: 'pointer',
-            marginLeft: 'auto'
+            cursor: isRunning ? 'not-allowed' : 'pointer',
+            marginLeft: 'auto',
+            opacity: isRunning ? 0.7 : 1
           }}
         >
-          Run Code
+          {isRunning ? 'Running...' : 'Run Code'}
         </button>
+        {lastError && lastError.includes('Convert JS Comments') && (
+          <button
+            onClick={convertCommentsToPython}
+            style={{
+              padding: '8px 16px',
+              backgroundColor: '#ff9800',
+              color: 'white',
+              border: 'none',
+              borderRadius: '5px',
+              cursor: 'pointer',
+              marginLeft: '10px'
+            }}
+          >
+            Convert JS Comments
+          </button>
+        )}
       </div>
 
       <div style={{ marginBottom: '20px' }}>
