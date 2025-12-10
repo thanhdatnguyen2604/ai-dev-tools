@@ -10,6 +10,8 @@ A minimal but working real-time collaborative coding interview platform built wi
 - Code execution in the browser (JavaScript via sandbox, Python via Pyodide/WASM)
 - Session sharing via URL
 - Live user count display
+- Connection status indicators
+- Automatic reconnection on WebSocket disconnection
 
 ## Project Structure
 
@@ -32,7 +34,8 @@ A minimal but working real-time collaborative coding interview platform built wi
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── HomePage.jsx     # Landing page
-│   │   │   └── SessionPage.jsx  # Coding session page
+│   │   │   ├── SessionPage.jsx  # Coding session page
+│   │   │   └── CodeEditor.jsx   # Monaco editor wrapper
 │   │   ├── App.jsx           # Main App component
 │   │   └── App.css           # Styling
 │   ├── package.json
@@ -40,6 +43,19 @@ A minimal but working real-time collaborative coding interview platform built wi
 ├── README.md               # This file
 └── start-dev.sh           # Development startup script
 ```
+
+## Technology Stack
+
+### Backend
+- **Django 4.2.7** with Django Channels 4.0.0 for WebSocket support
+- **Daphne 4.0.0** ASGI server
+- **Python 3.13**
+
+### Frontend
+- **React 19.2.0** with Vite 7.2.4
+- **Monaco Editor 0.55.1** (VS Code editor)
+- **React Router DOM 7.10.1** for routing
+- **Pyodide 0.24.1** for Python in-browser execution
 
 ## Quick Start
 
@@ -84,9 +100,9 @@ pip install -r requirements.txt
 python manage.py migrate
 ```
 
-5. Start the Django development server:
+5. Start the ASGI server (required for WebSocket support):
 ```bash
-python manage.py runserver 0.0.0.0:8989
+daphne -b 0.0.0.0 -p 8989 coding_interview_backend.asgi:application
 ```
 
 The backend will be available at `http://localhost:8989`
@@ -227,7 +243,7 @@ Current test suite includes:
 ### Common Issues
 
 1. **Port Already in Use**: If port 8989 is in use, change it in:
-   - Backend: `python manage.py runserver 0.0.0.0:<new-port>`
+   - Backend: `daphne -b 0.0.0.0 -p <new-port> coding_interview_backend.asgi:application`
    - Frontend: Update the API URLs in components
 
 2. **CORS Errors**: Make sure the backend is running and CORS is properly configured
